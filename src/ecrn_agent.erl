@@ -28,10 +28,17 @@
                 referenced_seconds,
                 seconds_at_reference,
                 timeout_type,
-                fast_forward=false}).
+                fast_forward=false,
+                remained_seconds=0}).
 
 -define(MILLISECONDS, 1000).
 -define(WAIT_BEFORE_RUN, 2000).
+
+%% http://erlang.org/doc/reference_manual/expressions.html
+%% The highest allowed value is 16#FFFFFFFF
+-define(MAX_TIMEOUT_MS, 16#FFFFFFFF).
+%% trunc(MAX_TIMEOUT_MS / 1000).
+-define(MAX_TIMEOUT_S, 4294967).
 
 %%%===================================================================
 %%% Types
@@ -93,9 +100,9 @@ init([JobRef, Job]) ->
     {DateTime, Actual} = ecrn_control:datetime(),
     NewState = set_internal_time(State, DateTime, Actual),
     case until_next_milliseconds(NewState, Job) of
-        {ok, Millis} when is_integer(Millis) ->
+        {ok, Millis, Remain} when is_integer(Millis) ->
             ecrn_reg:register(JobRef, self()),
-            {ok, NewState, Millis};
+            {ok, NewState#state{remained_seconds=Remain}, Millis};
         {error, _}  ->
             {stop, normal}
     end.
@@ -103,8 +110,8 @@ init([JobRef, Job]) ->
 %% @private
 handle_call(_Msg, _From, State) ->
     case until_next_milliseconds(State, State#state.job) of
-        {ok, Millis} ->
-            {reply, ok, State, Millis};
+        {ok, Millis, Remain} ->
+            {reply, ok, State#state{remained_seconds=Remain}, Millis};
         {error, _}  ->
             {stop, normal, ok, State}
     end.
@@ -116,21 +123,28 @@ handle_cast({set_datetime, DateTime, Actual}, State) ->
     fast_forward(State#state{fast_forward=true}, DateTime),
     NewState = set_internal_time(State, DateTime, Actual),
     case until_next_milliseconds(NewState, NewState#state.job) of
-        {ok, Millis} ->
-            {noreply, NewState, Millis};
+        {ok, Millis, Remain} ->
+            {noreply, NewState#state{remained_seconds=Remain}, Millis};
         {error, _}  ->
             {stop, normal, NewState}
     end.
 
 %% @private
+handle_info(timeout, State = #state{job=Job, remained_seconds=Remain}) when Remain /= 0 ->
+    case until_next_milliseconds(State, Job) of
+        {ok, Millis, Remain} ->
+            {noreply, State#state{remained_seconds=Remain}, Millis};
+        {error, _} ->
+            {stop, normal}
+    end;
 handle_info(timeout, State = #state{job = {{once, _}, _}}) ->
     do_job_run(State, State#state.job),
     {stop, normal, State};
 handle_info(timeout, State = #state{timeout_type=wait_before_run}) ->
     NewState = State#state{timeout_type=normal},
     case until_next_milliseconds(NewState, NewState#state.job) of
-        {ok, Millis} ->
-            {noreply, NewState, Millis};
+        {ok, Millis, Remain} ->
+            {noreply, NewState#state{remained_seconds=Remain}, Millis};
         {error, _}  ->
             {stop, normal, NewState}
     end;
@@ -179,11 +193,15 @@ current_date(State) ->
 %% @doc Calculates the duration in milliseconds until the next time
 %% a job is to be run.
 -spec until_next_milliseconds/2 :: (state(), erlcron:job()) ->
-                                          {ok, erlcron:seconds()} | {error, invalid_one_exception}.
+                                          {ok, erlcron:seconds(), erlcron:seconds()} | {error, invalid_one_exception}.
 until_next_milliseconds(State, Job) ->
     try
-        Millis = until_next_time(State, Job) * ?MILLISECONDS,
-        {ok, Millis}
+        Seconds = until_next_time(State, Job),
+        Millis = Seconds * ?MILLISECONDS,
+        case Millis > ?MAX_TIMEOUT_MS of
+            true -> {ok, ?MAX_TIMEOUT_MS, Seconds - ?MAX_TIMEOUT_S};
+            false -> {ok, Millis, 0}
+        end
     catch
         throw:invalid_once_exception ->
             {error, invalid_once_exception}
