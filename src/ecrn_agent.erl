@@ -44,8 +44,6 @@
 %%% Types
 %%%===================================================================
 
--type state() :: record(state).
-
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -178,7 +176,6 @@ do_job_run(State, {_, {M, F, A}})
     proc_lib:spawn(M, F, A).
 
 %% @doc Returns the current time, in seconds past midnight.
--spec current_time/1 :: (state()) -> erlcron:seconds().
 current_time(State) ->
     {_, {H,M,S}} = current_date(State),
     S + M * 60 + H * 3600.
@@ -192,8 +189,6 @@ current_date(State) ->
 
 %% @doc Calculates the duration in milliseconds until the next time
 %% a job is to be run.
--spec until_next_milliseconds/2 :: (state(), erlcron:job()) ->
-                                          {ok, erlcron:seconds(), erlcron:seconds()} | {error, invalid_one_exception}.
 until_next_milliseconds(State, Job) ->
     try
         Seconds = until_next_time(State, Job),
@@ -218,8 +213,6 @@ normalize_seconds(State, Seconds) ->
 
 %% @doc Calculates the duration in seconds until the next time
 %% a job is to be run.
--spec until_next_time/2 :: (state(), {erlcron:run_when(), term()}) ->
-                                   erlcron:seconds().
 until_next_time(_State, {{once, Seconds}, _What}) when is_integer(Seconds) ->
     Seconds;
 until_next_time(State, {{once, {H, M, S}}, _What})
@@ -262,7 +255,6 @@ until_next_time(State, {{monthly, DoM, Period}, _What}) ->
 
 %% @doc Calculates the duration in seconds until the next time this
 %% period is to occur during the day.
--spec until_next_daytime/2 :: (state(), erlcron:period()) -> erlcron:seconds().
 until_next_daytime(State, Period) ->
     StartTime = first_time(Period),
     EndTime = last_time(Period),
@@ -362,21 +354,18 @@ resolve_dow(sun) ->
 
 %% @doc Calculates the duration in seconds until the given time occurs
 %% tomorrow.
--spec until_tomorrow/2 :: (state(), erlcron:seconds()) -> erlcron:seconds().
 until_tomorrow(State, StartTime) ->
     (StartTime + 24*3600) - current_time(State).
 
 %% @doc Calculates the duration in seconds until the given period
 %% occurs several days from now.
--spec until_days_from_now/3 :: (state(), erlcron:period(), integer()) ->
-                                       erlcron:seconds().
+
 until_days_from_now(State, Period, Days) ->
     Days * 24 * 3600 + until_next_daytime(State, Period).
 
 %% @doc Calculates the duration in seconds until the given period
 %% occurs, which may be today or several days from now.
--spec until_next_daytime_or_days_from_now/3 :: (state(), erlcron:period(), integer()) ->
-                                                       erlcron:seconds().
+
 until_next_daytime_or_days_from_now(State, Period, Days) ->
     CurrentTime = current_time(State),
     case last_time(Period) of
